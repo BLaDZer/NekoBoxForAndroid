@@ -157,6 +157,12 @@ object TunImplementation {
     const val GVISOR = 0
     const val SYSTEM = 1
     const val MIXED = 2
+
+    /** hev-socks5-tunnel (native): packets are forwarded to the mixed inbound over SOCKS5. */
+    const val HEV = 3
+
+    /** sing-box's own `tun` inbound is only used by the implementations it provides. */
+    fun usesSingBoxTun(implementation: Int) = implementation != HEV
 }
 
 object IPv6Mode {

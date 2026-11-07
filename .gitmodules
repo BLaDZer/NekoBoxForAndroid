@@ -9,3 +9,6 @@
 [submodule "libcore/third_party/gomobile"]
 	path = libcore/third_party/gomobile
 	url = https://github.com/MatsuriDayo/gomobile.git
+[submodule "libcore/third_party/hev-socks5-tunnel"]
+	path = libcore/third_party/hev-socks5-tunnel
+	url = https://github.com/heiher/hev-socks5-tunnel

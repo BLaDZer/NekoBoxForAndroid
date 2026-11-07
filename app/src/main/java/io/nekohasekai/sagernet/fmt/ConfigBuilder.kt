@@ -133,13 +133,16 @@ fun buildConfig(
     val domainListDNSDirectForce = mutableListOf<String>()
     val bypassDNSBeans = hashSetOf<AbstractBean>()
     val isVPN = DataStore.serviceMode == Key.MODE_VPN
+    // with hev-socks5-tunnel there is no sing-box tun inbound: traffic arrives via the mixed inbound
+    val hasSingBoxTun = isVPN && TunImplementation.usesSingBoxTun(DataStore.tunImplementation)
     val bind = if (!forTest && DataStore.allowAccess) "0.0.0.0" else LOCALHOST
     val remoteDns = DataStore.remoteDns.split("\n")
         .mapNotNull { dns -> dns.trim().takeIf { it.isNotBlank() && !it.startsWith("#") } }
     val directDNS = DataStore.directDns.split("\n")
         .mapNotNull { dns -> dns.trim().takeIf { it.isNotBlank() && !it.startsWith("#") } }
     val enableDnsRouting = DataStore.enableDnsRouting
-    val useFakeDns = DataStore.enableFakeDns && !forTest
+    // hev-socks5-tunnel maps fake DNS itself (mapdns), sing-box's FakeIP only serves its tun inbound
+    val useFakeDns = DataStore.enableFakeDns && !forTest && TunImplementation.usesSingBoxTun(DataStore.tunImplementation)
     val needSniff = DataStore.trafficSniffing > 0
     val externalIndexMap = ArrayList<IndexEntity>()
     val ipv6Mode = if (forTest) IPv6Mode.ENABLE else DataStore.ipv6Mode
@@ -195,7 +198,7 @@ fun buildConfig(
         inbounds = mutableListOf()
 
         if (!forTest) {
-            if (isVPN) inbounds.add(Inbound_TunOptions().apply {
+            if (hasSingBoxTun) inbounds.add(Inbound_TunOptions().apply {
                 type = "tun"
                 tag = "tun-in"
                 stack = when (DataStore.tunImplementation) {
@@ -234,7 +237,7 @@ fun buildConfig(
 
         if (!forTest) {
             val inboundTags = mutableListOf(TAG_MIXED)
-            if (isVPN) inboundTags.add(0, "tun-in")
+            if (hasSingBoxTun) inboundTags.add(0, "tun-in")
             if (DataStore.resolveDestination) route.rules.add(Rule_DefaultOptions().apply {
                 inbound = inboundTags
                 action = "resolve"
@@ -490,7 +493,7 @@ fun buildConfig(
         // addresses. Let the native resolve action restore it before routing.
         if (!forTest && !DataStore.resolveDestination && endpoints.any { it is Endpoint_WireGuardOptions }) {
             route.rules.add(Rule_DefaultOptions().apply {
-                inbound = if (isVPN) listOf("tun-in", TAG_MIXED) else listOf(TAG_MIXED)
+                inbound = if (hasSingBoxTun) listOf("tun-in", TAG_MIXED) else listOf(TAG_MIXED)
                 network = listOf("udp")
                 action = "resolve"
                 strategy = genDomainStrategy(true)

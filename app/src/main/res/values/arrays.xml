@@ -430,6 +430,7 @@
         <item>gVisor</item>
         <item>System</item>
         <item>Mixed</item>
+        <item>Hev (hev-socks5-tunnel)</item>
     </string-array>
 
     <string-array name="hysteria_protocol">

@@ -16,6 +16,7 @@ import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.ui.VpnRequestActivity
 import io.nekohasekai.sagernet.utils.Subnet
+import moe.matsuri.nb4a.hevtun.HevTunRuntime
 import android.net.VpnService as BaseVpnService
 
 class VpnService : BaseVpnService(),
@@ -26,6 +27,8 @@ class VpnService : BaseVpnService(),
         const val PRIVATE_VLAN4_CLIENT = "172.19.0.1"
         const val PRIVATE_VLAN4_ROUTER = "172.19.0.2"
         const val FAKEDNS_VLAN4_CLIENT = "198.18.0.0"
+        const val HEV_MAPDNS_VLAN4 = "100.64.0.0"
+        const val HEV_MAPDNS_NETMASK = "255.192.0.0" // 100.64.0.0/10
         const val PRIVATE_VLAN6_CLIENT = "fdfe:dcba:9876::1"
         const val PRIVATE_VLAN6_ROUTER = "fdfe:dcba:9876::2"
 
@@ -40,6 +43,12 @@ class VpnService : BaseVpnService(),
     override suspend fun startProcesses() {
         DataStore.vpnService = this
         super.startProcesses() // launch proxy instance
+
+        if (!TunImplementation.usesSingBoxTun(DataStore.tunImplementation)) {
+            // sing-box has no tun inbound in this mode: we own the TUN device
+            // and hand its fd to hev-socks5-tunnel.
+            HevTunRuntime.start(this, establishTun())
+        }
     }
 
     override var wakeLock: PowerManager.WakeLock? = null
@@ -52,6 +61,7 @@ class VpnService : BaseVpnService(),
 
     @Suppress("EXPERIMENTAL_API_USAGE")
     override fun killProcesses() {
+        HevTunRuntime.stop()
         conn?.close()
         conn = null
         super.killProcesses()
@@ -91,6 +101,10 @@ class VpnService : BaseVpnService(),
 //        Logs.d(tunPlatformOptionsJson)
 //        val tunOptions = JSONObject(tunOptionsJson)
 
+        return establishTun()
+    }
+
+    fun establishTun(): Int {
         // address & route & MTU ...... use NB4A GUI config
         val builder = Builder().setConfigureIntent(SagerNet.configureIntent(this))
             .setSession(getString(R.string.app_name))
@@ -112,6 +126,9 @@ class VpnService : BaseVpnService(),
             }
             builder.addRoute(PRIVATE_VLAN4_ROUTER, 32)
             builder.addRoute(FAKEDNS_VLAN4_CLIENT, 15)
+            if (!TunImplementation.usesSingBoxTun(DataStore.tunImplementation) && DataStore.enableFakeDns) {
+                builder.addRoute(HEV_MAPDNS_VLAN4, 10)
+            }
             // https://issuetracker.google.com/issues/149636790
             if (ipv6Mode != IPv6Mode.DISABLE) {
                 builder.addRoute("2000::", 3)

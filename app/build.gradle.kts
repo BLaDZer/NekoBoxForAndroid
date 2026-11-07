@@ -85,4 +85,22 @@ dependencies {
     ksp("com.github.MatrixDev.Roomigrant:RoomigrantCompiler:0.3.4")
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+
+    testImplementation("junit:junit:4.13.2")
+}
+
+// Native hev-socks5-tunnel (libcore/third_party/hev-socks5-tunnel) for the "Hev" TUN implementation.
+// Built on demand when packaging; unit tests don't need it (nor the NDK). FORCE_HEV=1 rebuilds.
+val buildHevTun by tasks.registering {
+    val abis = listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+    doLast {
+        val missing = abis.any { !file("src/main/jniLibs/$it/libhev-socks5-tunnel.so").exists() }
+        if (missing || System.getenv("FORCE_HEV") == "1") {
+            exec { commandLine("bash", rootProject.file("buildScript/lib/hevtun.sh").absolutePath) }
+        }
+    }
+}
+
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("JniLibFolders") }.configureEach {
+    dependsOn(buildHevTun)
 }
