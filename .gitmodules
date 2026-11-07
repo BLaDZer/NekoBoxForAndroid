@@ -1,0 +1,11 @@
+[submodule "libcore/third_party/sing-box"]
+	path = libcore/third_party/sing-box
+	url = https://github.com/SagerNet/sing-box.git
+	ignore = dirty
+	shallow = false
+[submodule "libcore/third_party/libneko"]
+	path = libcore/third_party/libneko
+	url = https://github.com/MatsuriDayo/libneko.git
+[submodule "libcore/third_party/gomobile"]
+	path = libcore/third_party/gomobile
+	url = https://github.com/MatsuriDayo/gomobile.git

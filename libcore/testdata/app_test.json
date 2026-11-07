@@ -1,0 +1,20 @@
+{
+  "log": {"level": "info"},
+  "dns": {
+    "servers": [
+      {"type": "local", "tag": "dns-local"},
+      {"type": "udp", "tag": "dns-direct", "server": "223.5.5.5", "domain_resolver": "dns-local"}
+    ],
+    "final": "dns-direct",
+    "strategy": "prefer_ipv4",
+    "independent_cache": true
+  },
+  "inbounds": [],
+  "outbounds": [
+    {"type": "vmess", "tag": "proxy", "server": "example.com", "server_port": 443, "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811", "domain_strategy": "",
+     "tls": {"enabled": true, "server_name": "example.com", "ech": {"enabled": true, "config": ["-----BEGIN ECH CONFIGS-----", "-----END ECH CONFIGS-----"]}}},
+    {"type": "direct", "tag": "direct"},
+    {"type": "direct", "tag": "bypass"}
+  ],
+  "route": {"rules": [], "final": "proxy", "auto_detect_interface": true, "default_domain_resolver": "dns-direct"}
+}

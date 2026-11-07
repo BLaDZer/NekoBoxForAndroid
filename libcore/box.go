@@ -11,26 +11,22 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/matsuridayo/libneko/protect_server"
 	"github.com/matsuridayo/libneko/speedtest"
 	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/boxapi"
-	"github.com/sagernet/sing-box/experimental/libbox/platform"
+	"github.com/sagernet/sing-box/adapter/certificate"
+	"libcore/boxapi"
+	"github.com/sagernet/sing-box/experimental/deprecated"
 	"github.com/sagernet/sing-box/protocol/group"
 
 	box "github.com/sagernet/sing-box"
-	"github.com/sagernet/sing-box/common/conntrack"
-	"github.com/sagernet/sing-box/common/dialer"
 	"github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/service"
 	"github.com/sagernet/sing/service/pause"
 )
-
-func init() {
-	dialer.DoNotSelectInterface = true
-}
 
 var mainInstance *BoxInstance
 
@@ -59,12 +55,16 @@ func VersionBox() string {
 }
 
 func ResetAllConnections(system bool) {
-	if system {
-		conntrack.Close()
-		log.Println("Reset system connections done")
-	} else {
+	if !system {
 		log.Println("TODO: Reset user connections")
+		return
 	}
+	if mainInstance == nil {
+		log.Println("Reset system connections skipped: no active instance")
+		return
+	}
+	mainInstance.Router().ResetNetwork()
+	log.Println("Reset system connections done")
 }
 
 type BoxInstance struct {
@@ -77,6 +77,12 @@ type BoxInstance struct {
 	v2api        *boxapi.SbV2rayServer
 	selector     *group.Selector
 	pauseManager pause.Manager
+	deprecated   *deprecatedReporter
+
+	selectedAccess sync.Mutex
+	selectedTag    string
+	selectorDone   chan struct{} // closed by Close to stop watchSelector
+	selectorExited chan struct{} // closed by watchSelector when it returned
 }
 
 func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *BoxInstance, err error) {
@@ -86,16 +92,23 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = box.Context(ctx,
 		nekoboxAndroidInboundRegistry(), nekoboxAndroidOutboundRegistry(), nekoboxAndroidEndpointRegistry(),
-		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(),
+		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(), certificate.NewRegistry(),
 	)
 	ctx = service.ContextWithDefaultRegistry(ctx)
-	service.MustRegister[platform.Interface](ctx, boxPlatformInterfaceInstance)
+	service.MustRegister[adapter.PlatformInterface](ctx, boxPlatformInterfaceInstance)
+	deprecatedNotes := newDeprecatedReporter()
+	service.MustRegister[deprecated.Manager](ctx, deprecatedNotes)
 
 	// parse options
 	var options option.Options
 	err = options.UnmarshalJSONContext(ctx, []byte(config))
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("decode config: %v", err)
+	}
+	if err = rewriteGeoRuleSets(options.Route.RuleSet); err != nil {
+		cancel()
+		return nil, fmt.Errorf("geo rule-set: %v", err)
 	}
 
 	// create box
@@ -113,6 +126,7 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 		Box:          instance,
 		cancel:       cancel,
 		pauseManager: service.FromContext[pause.Manager](ctx),
+		deprecated:   deprecatedNotes,
 	}
 
 	// selector
@@ -133,7 +147,13 @@ func (b *BoxInstance) Start() (err error) {
 
 	if b.state == 0 {
 		b.state = 1
-		return b.Box.Start()
+		err = b.Box.Start()
+		if err == nil && b.selector != nil {
+			b.selectorDone = make(chan struct{})
+			b.selectorExited = make(chan struct{})
+			go b.watchSelector(b.selectorDone, b.selectorExited)
+		}
+		return err
 	}
 	return errors.New("already started")
 }
@@ -154,6 +174,12 @@ func (b *BoxInstance) Close() (err error) {
 	if mainInstance == b {
 		mainInstance = nil
 		goServeProtect(false)
+	}
+
+	if b.selectorDone != nil {
+		close(b.selectorDone)
+		<-b.selectorExited // no callbacks after Close returns
+		b.selectorDone = nil
 	}
 
 	// close box
@@ -207,10 +233,52 @@ func (b *BoxInstance) QueryStats(tag, direct string) int64 {
 }
 
 func (b *BoxInstance) SelectOutbound(tag string) bool {
-	if b.selector != nil {
-		return b.selector.SelectOutbound(tag)
+	if b.selector == nil || !b.selector.SelectOutbound(tag) {
+		return false
 	}
-	return false
+	b.notifySelected()
+	return true
+}
+
+// notifySelected reports a changed "proxy" selection to the app
+// (NB4AInterface.Selector_OnProxySelected). Stock sing-box has no hook for
+// this, so it is called after our own SelectOutbound and from watchSelector,
+// which also catches switches made through the Clash API.
+func (b *BoxInstance) notifySelected() {
+	if b.selector == nil || intfNB4A == nil {
+		return
+	}
+	var now string
+	if selected := b.selector.Selected("tcp"); selected != nil {
+		now = selected.Tag()
+	}
+	b.selectedAccess.Lock()
+	first := b.selectedTag == ""
+	changed := now != b.selectedTag
+	b.selectedTag = now
+	b.selectedAccess.Unlock()
+	if changed && !first && now != "" {
+		intfNB4A.Selector_OnProxySelected(b.selector.Tag(), now)
+	}
+}
+
+// selectorPollInterval is how often external selection changes (Clash API) are noticed.
+var selectorPollInterval = time.Second
+
+func (b *BoxInstance) watchSelector(done <-chan struct{}, exited chan<- struct{}) {
+	defer close(exited)
+	defer device.DeferPanicToError("watchSelector", func(err error) { log.Println(err) })
+	b.notifySelected() // record the initial selection without reporting it
+	ticker := time.NewTicker(selectorPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			b.notifySelected()
+		}
+	}
 }
 
 func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err error) {

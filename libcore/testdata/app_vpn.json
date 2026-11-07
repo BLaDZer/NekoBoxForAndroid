@@ -1,0 +1,76 @@
+{
+  "log": {"level": "info"},
+  "dns": {
+    "servers": [
+      {"type": "local", "tag": "dns-local"},
+      {"type": "udp", "tag": "dns-direct", "server": "223.5.5.5", "domain_resolver": "dns-local"},
+      {"type": "https", "tag": "dns-remote", "server": "8.8.8.8", "path": "/dns-query", "detour": "proxy", "domain_resolver": "dns-direct"},
+      {"type": "fakeip", "tag": "dns-fake", "inet4_range": "198.18.0.0/15", "inet6_range": "fc00::/18"}
+    ],
+    "rules": [
+      {"domain": ["example-proxy-server.test"], "server": "dns-direct", "strategy": "prefer_ipv4"},
+      {"inbound": ["tun-in"], "server": "dns-fake", "disable_cache": true, "strategy": "ipv4_only"},
+      {"domain_suffix": ["cn"], "server": "dns-direct", "strategy": "prefer_ipv4"},
+      {"domain_keyword": ["ads"], "action": "predefined", "rcode": "NOERROR"}
+    ],
+    "final": "dns-remote",
+    "strategy": "prefer_ipv4",
+    "independent_cache": true
+  },
+  "inbounds": [
+    {"type": "tun", "tag": "tun-in", "stack": "mixed", "mtu": 9000, "address": ["172.19.0.1/28", "fdfe:dcba:9876::1/126"]},
+    {"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080},
+    {"type": "direct", "tag": "c-1-mapping-1", "listen": "127.0.0.1", "listen_port": 2081, "override_address": "1.2.3.4", "override_port": 443}
+  ],
+  "outbounds": [
+    {"type": "selector", "tag": "proxy", "outbounds": ["vless-reality", "vmess-ws", "trojan-grpc", "ss", "hy2", "tuic", "anytls", "ssh", "socks", "http", "chain-a"], "default": "vless-reality"},
+    {"type": "vless", "tag": "vless-reality", "server": "vless.example.com", "server_port": 443, "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811", "flow": "xtls-rprx-vision", "domain_strategy": "prefer_ipv4",
+     "tls": {"enabled": true, "server_name": "example.com", "utls": {"enabled": true, "fingerprint": "chrome"}, "reality": {"enabled": true, "public_key": "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0", "short_id": "0123456789abcdef"}}},
+    {"type": "vmess", "tag": "vmess-ws", "server": "1.2.3.5", "server_port": 443, "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811", "security": "auto", "alter_id": 0, "packet_encoding": "xudp",
+     "multiplex": {"enabled": true, "protocol": "h2mux", "max_streams": 4},
+     "transport": {"type": "ws", "path": "/ws", "headers": {"Host": "example.com"}, "max_early_data": 2048, "early_data_header_name": "Sec-WebSocket-Protocol"},
+     "tls": {"enabled": true, "server_name": "example.com", "insecure": true, "alpn": ["h2", "http/1.1"]}},
+    {"type": "trojan", "tag": "trojan-grpc", "server": "1.2.3.6", "server_port": 443, "password": "pass",
+     "transport": {"type": "grpc", "service_name": "svc"}, "tls": {"enabled": true, "server_name": "example.com"}},
+    {"type": "shadowsocks", "tag": "ss", "server": "1.2.3.7", "server_port": 8388, "method": "2022-blake3-aes-128-gcm", "password": "AAAAAAAAAAAAAAAAAAAAAA==", "udp_over_tcp": true},
+    {"type": "hysteria2", "tag": "hy2", "server": "1.2.3.8", "server_port": 443, "server_ports": ["20000:30000"], "hop_interval": "30s", "up_mbps": 100, "down_mbps": 100, "password": "pass", "obfs": {"type": "salamander", "password": "x"}, "tls": {"enabled": true, "server_name": "example.com"}},
+    {"type": "tuic", "tag": "tuic", "server": "1.2.3.9", "server_port": 443, "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811", "password": "pass", "congestion_control": "bbr", "udp_relay_mode": "native", "zero_rtt_handshake": true, "tls": {"enabled": true, "server_name": "example.com", "alpn": ["h3"]}},
+    {"type": "anytls", "tag": "anytls", "server": "1.2.3.10", "server_port": 443, "password": "pass", "tls": {"enabled": true, "server_name": "example.com"}},
+    {"type": "ssh", "tag": "ssh", "server": "1.2.3.11", "server_port": 22, "user": "root", "password": "pass"},
+    {"type": "socks", "tag": "socks", "server": "1.2.3.12", "server_port": 1080, "version": "5", "username": "u", "password": "p"},
+    {"type": "http", "tag": "http", "server": "1.2.3.13", "server_port": 8080, "username": "u", "password": "p"},
+    {"type": "shadowtls", "tag": "chain-a", "server": "1.2.3.14", "server_port": 443, "version": 3, "password": "pass", "detour": "ss", "tls": {"enabled": true, "server_name": "example.com"}},
+    {"type": "direct", "tag": "direct"},
+    {"type": "direct", "tag": "bypass"}
+  ],
+  "endpoints": [
+    {"type": "wireguard", "tag": "wg", "address": ["10.0.0.2/32"], "private_key": "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=", "mtu": 1408,
+     "peers": [{"address": "1.2.3.15", "port": 51820, "public_key": "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=", "allowed_ips": ["0.0.0.0/0", "::/0"], "reserved": [1, 2, 3]}]}
+  ],
+  "route": {
+    "rules": [
+      {"port": [53], "action": "hijack-dns"},
+      {"protocol": ["dns"], "action": "hijack-dns"},
+      {"inbound": ["tun-in", "mixed-in"], "action": "resolve", "strategy": "prefer_ipv4"},
+      {"inbound": ["tun-in", "mixed-in"], "action": "sniff"},
+      {"inbound": ["c-1-mapping-1"], "outbound": "direct"},
+      {"domain_suffix": ["cn"], "outbound": "bypass"},
+      {"rule_set": ["geoip-cn"], "outbound": "bypass"},
+      {"package_name": ["com.example.app"], "outbound": "proxy"},
+      {"user_id": [10123], "outbound": "bypass"},
+      {"port_range": ["1000:2000"], "network": ["udp"], "outbound": "proxy"},
+      {"ip_is_private": true, "outbound": "bypass"},
+      {"ip_cidr": ["224.0.0.0/3", "ff00::/8"], "source_ip_cidr": ["224.0.0.0/3", "ff00::/8"], "action": "reject"},
+      {"domain_keyword": ["ads"], "action": "reject"}
+    ],
+    "rule_set": [
+      {"type": "local", "tag": "geoip-cn", "format": "binary", "path": "geoip:cn"}
+    ],
+    "final": "proxy",
+    "auto_detect_interface": true,
+    "default_domain_resolver": "dns-direct"
+  },
+  "experimental": {
+    "clash_api": {"external_controller": "127.0.0.1:9090"}
+  }
+}
